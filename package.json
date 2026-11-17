@@ -1,0 +1,11 @@
+{
+  "name": "travian-auction-tracker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1"
+  }
+}

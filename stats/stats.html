@@ -1,0 +1,60 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Auction Statistics</title>
+  <link rel="stylesheet" href="../src/common.css">
+  <link rel="stylesheet" href="stats.css">
+</head>
+<body>
+  <header>
+    <h1>Auction Statistics</h1>
+    <label>Server <select id="server"></select></label>
+    <label>Since <select id="since">
+      <option value="0">All time</option>
+      <option value="1">Last 24 h</option>
+      <option value="7">Last 7 days</option>
+      <option value="30">Last 30 days</option>
+    </select></label>
+  </header>
+
+  <main>
+    <section class="cards" id="cards"></section>
+
+    <section>
+      <h2>Prices per item <span class="muted">(per unit; click a row to filter the auction list)</span></h2>
+      <div class="scroll"><table id="items"></table></div>
+    </section>
+
+    <section>
+      <h2>Top buyers</h2>
+      <div class="scroll"><table id="buyers"></table></div>
+    </section>
+
+    <section>
+      <h2>Auctions</h2>
+      <div class="toolbar">
+        <input id="search" type="search" placeholder="Filter by item, buyer or alliance">
+        <span id="count" class="muted"></span>
+      </div>
+      <div class="scroll"><table id="auctions"></table></div>
+    </section>
+
+    <section>
+      <h2>Data</h2>
+      <div class="toolbar">
+        <button id="exportJson">Export JSON</button>
+        <button id="exportCsv">Export CSV</button>
+        <label class="button">Import JSON<input id="import" type="file" accept=".json,application/json" hidden></label>
+        <button id="rebuild" title="Recompute auctions from all stored captures">Rebuild from captures</button>
+        <button id="clear" class="danger">Delete all data</button>
+      </div>
+      <p id="dataStatus" class="muted"></p>
+      <h3>Captures</h3>
+      <div class="scroll"><table id="captures"></table></div>
+    </section>
+  </main>
+  <script type="module" src="stats.js"></script>
+</body>
+</html>
