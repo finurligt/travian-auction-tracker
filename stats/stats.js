@@ -139,6 +139,181 @@ function renderItems(auctions) {
   );
 }
 
+const SVG_NS = "http://www.w3.org/2000/svg";
+const HOUR = 3600000;
+const DAY = 24 * HOUR;
+let chartPoints = [];
+
+function svgEl(parent, name, attrs = {}) {
+  const el = document.createElementNS(SVG_NS, name);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  parent.appendChild(el);
+  return el;
+}
+
+function niceStep(range, targetTicks) {
+  const raw = range / targetTicks;
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const n = raw / mag;
+  return (n < 1.5 ? 1 : n < 3 ? 2 : n < 7 ? 5 : 10) * mag;
+}
+
+// Noon of the local day: where a day's median is drawn.
+function dayNoon(t) {
+  const d = new Date(t);
+  d.setHours(12, 0, 0, 0);
+  return d.getTime();
+}
+
+function timeTicks(min, max, maxTicks) {
+  const steps = [HOUR, 3 * HOUR, 6 * HOUR, 12 * HOUR, DAY, 2 * DAY, 7 * DAY, 14 * DAY, 30 * DAY, 91 * DAY];
+  const step = steps.find((s) => (max - min) / s <= maxTicks) || steps.at(-1);
+  const start = new Date(min);
+  if (step >= DAY) start.setHours(0, 0, 0, 0);
+  else start.setMinutes(0, 0, 0);
+  const ticks = [];
+  for (let d = start; d.getTime() <= max; ) {
+    if (d.getTime() >= min) ticks.push(d.getTime());
+    d = new Date(d);
+    // Step whole days by calendar date so ticks stay on midnight across DST.
+    if (step >= DAY) d.setDate(d.getDate() + step / DAY);
+    else d.setTime(d.getTime() + step);
+  }
+  const label = (t) =>
+    step >= DAY
+      ? new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+      : new Date(t).toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" });
+  return ticks.map((t) => ({ t, label: label(t) }));
+}
+
+function renderChart(auctions) {
+  const groups = new Map();
+  for (const a of auctions) {
+    const k = itemKey(a);
+    if (!groups.has(k)) groups.set(k, { key: k, name: a.itemName, count: 0 });
+    groups.get(k).count += 1;
+  }
+  const options = [...groups.values()].sort((a, b) => b.count - a.count);
+  const key = state.item && groups.has(state.item) ? state.item : options[0]?.key;
+  const sel = $("chartItem");
+  sel.replaceChildren(...options.map((g) => new Option(`${g.name} (${g.count})`, g.key)));
+  if (key) sel.value = key;
+
+  const svg = $("chartSvg");
+  svg.replaceChildren();
+  $("tooltip").hidden = true;
+  chartPoints = [];
+  const width = svg.clientWidth || 800;
+  const height = svg.clientHeight || 280;
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+
+  const list = auctions.filter((a) => itemKey(a) === key).sort((a, b) => a.firstSeenAt - b.firstSeenAt);
+  if (!list.length) {
+    svgEl(svg, "text", { x: width / 2, y: height / 2, "text-anchor": "middle", class: "empty-label" }).textContent = "No auctions yet.";
+    return;
+  }
+
+  const m = { left: 52, right: 18, top: 14, bottom: 28 };
+  let [t0, t1] = [list[0].firstSeenAt, list.at(-1).firstSeenAt];
+  if (t1 - t0 < HOUR) [t0, t1] = [t0 - HOUR, t1 + HOUR];
+  const pad = (t1 - t0) * 0.03;
+  [t0, t1] = [t0 - pad, t1 + pad];
+
+  // Daily medians, so the trend reads through the scatter of single sales.
+  const days = new Map();
+  for (const a of list) {
+    const d = dayNoon(a.firstSeenAt);
+    if (!days.has(d)) days.set(d, []);
+    days.get(d).push(a.unitPrice);
+  }
+  const medians = [...days].map(([day, v]) => ({ day, t: Math.min(Math.max(day, t0), t1), v: median(v), n: v.length }));
+
+  const yMaxRaw = Math.max(...list.map((a) => a.unitPrice)) || 1;
+  const yStep = niceStep(yMaxRaw, 5);
+  const yMax = Math.ceil((yMaxRaw * 1.05) / yStep) * yStep;
+  const x = (t) => m.left + ((t - t0) / (t1 - t0)) * (width - m.left - m.right);
+  const y = (v) => height - m.bottom - (v / yMax) * (height - m.top - m.bottom);
+
+  for (let v = 0; v <= yMax + 1e-9; v += yStep) {
+    svgEl(svg, "line", { x1: m.left, x2: width - m.right, y1: y(v), y2: y(v), class: "grid" });
+    svgEl(svg, "text", { x: m.left - 8, y: y(v) + 4, "text-anchor": "end", class: "axis-label" }).textContent = fmt(v, yStep < 1 ? 1 : 0);
+  }
+  for (const tick of timeTicks(t0, t1, Math.max(2, Math.floor((width - m.left - m.right) / 110)))) {
+    svgEl(svg, "text", { x: x(tick.t), y: height - 8, "text-anchor": "middle", class: "axis-label" }).textContent = tick.label;
+  }
+
+  if (medians.length > 1) {
+    svgEl(svg, "path", { class: "median", d: medians.map((p, i) => `${i ? "L" : "M"}${x(p.t)},${y(p.v)}`).join(" ") });
+  }
+  if (medians.length <= 31) {
+    for (const p of medians) svgEl(svg, "circle", { cx: x(p.t), cy: y(p.v), r: 3.5, class: "median-point" });
+  }
+
+  const medianByDay = new Map(medians.map((p) => [p.day, p]));
+  for (const a of list) {
+    const px = x(a.firstSeenAt);
+    const py = y(a.unitPrice);
+    const el = svgEl(svg, "circle", { cx: px, cy: py, r: 4.5, class: "point" });
+    chartPoints.push({ px, py, a, el, day: medianByDay.get(dayNoon(a.firstSeenAt)) });
+  }
+}
+
+function showChartTooltip(e) {
+  const svg = $("chartSvg");
+  const rect = svg.getBoundingClientRect();
+  const scale = rect.width / (svg.viewBox.baseVal.width || rect.width);
+  const mx = (e.clientX - rect.left) / scale;
+  const my = (e.clientY - rect.top) / scale;
+  let best = null;
+  let bestDist = 24;
+  for (const p of chartPoints) {
+    p.el.classList.remove("hover");
+    const d = Math.hypot(p.px - mx, p.py - my);
+    if (d < bestDist) [best, bestDist] = [p, d];
+  }
+  const tip = $("tooltip");
+  if (!best) {
+    tip.hidden = true;
+    return;
+  }
+  best.el.classList.add("hover");
+  const a = best.a;
+  const line = (text, cls) => {
+    const div = document.createElement("div");
+    div.textContent = text;
+    if (cls) div.className = cls;
+    return div;
+  };
+  tip.replaceChildren(
+    line(`${a.itemName} ×${fmt(a.quantity)}`),
+    line(`${fmt(a.unitPrice, 1)} per unit · ${fmt(a.price)} total`),
+    line(`${a.bidder}${a.alliance ? ` (${a.alliance})` : ""} · ${fmt(a.bids)} bids`, "muted"),
+    line(`First seen ${fmtDate(a.firstSeenAt)}`, "muted"),
+    line(`Median that day: ${fmt(best.day.v, 1)} (${best.day.n} auctions)`, "muted"),
+  );
+  tip.hidden = false;
+  const box = $("chart").getBoundingClientRect();
+  const left = best.px * scale + 12;
+  const flip = left + tip.offsetWidth > box.width;
+  tip.style.left = `${flip ? best.px * scale - tip.offsetWidth - 12 : left}px`;
+  tip.style.top = `${Math.max(4, best.py * scale - tip.offsetHeight / 2)}px`;
+}
+
+$("chartSvg").addEventListener("pointermove", showChartTooltip);
+$("chartSvg").addEventListener("pointerleave", () => {
+  $("tooltip").hidden = true;
+  for (const p of chartPoints) p.el.classList.remove("hover");
+});
+$("chartItem").addEventListener("change", (e) => {
+  state.item = e.target.value;
+  render();
+});
+let resizeTimer;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => renderChart(filtered()), 150);
+});
+
 function renderBuyers(auctions) {
   const groups = new Map();
   for (const a of auctions) {
@@ -212,6 +387,7 @@ function render() {
   renderServers();
   const auctions = filtered();
   renderCards(auctions);
+  renderChart(auctions);
   renderItems(auctions);
   renderBuyers(auctions);
   renderAuctions(auctions);

@@ -1,17 +1,27 @@
 {
   "manifest_version": 3,
   "name": "Travian Auction Tracker",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Manually capture finished Travian auctions from the page you are looking at and keep statistics. Read-only: never clicks or changes anything on the page.",
-  "permissions": ["activeTab", "scripting", "storage", "unlimitedStorage"],
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "unlimitedStorage"
+  ],
   "action": {
     "default_title": "Travian Auction Tracker",
-    "default_popup": "popup/popup.html"
+    "default_popup": "popup/popup.html",
+    "default_icon": "icons/icon.svg"
   },
   "browser_specific_settings": {
     "gecko": {
       "id": "travian-auction-tracker@local",
       "strict_min_version": "115.0"
     }
+  },
+  "icons": {
+    "48": "icons/icon.svg",
+    "96": "icons/icon.svg"
   }
 }

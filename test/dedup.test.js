@@ -54,7 +54,7 @@ test("the user's two snapshots: only the newly finished auctions are added", () 
   assert.deepEqual(applyCapture(db, snapshot2), { finished: 11, added: 3, duplicates: 8, skippedRunning: 2, unordered: false });
   assert.equal(db.auctions.length, 11);
   // Capturing the same page again changes nothing.
-  assert.equal(applyCapture(db, { ...snapshot2, capturedAt: 3000 }).added, 0);
+  assert.equal(applyCapture(db, { ...snapshot2, id: "again", capturedAt: 3000 }).added, 0);
   assert.equal(db.auctions.length, 11);
 });
 
@@ -87,7 +87,7 @@ test("page edges: a row with an unknown neighbour still matches", () => {
 test("ascending sort and unsorted lists", () => {
   const db = emptyDb();
   applyCapture(db, snapshot2);
-  const reversed = { ...snapshot2, capturedAt: 5000, tables: [{ ...snapshot2.tables[0], order: "oldestFirst", rows: [...snapshot2.tables[0].rows].reverse() }] };
+  const reversed = { ...snapshot2, id: "reversed", capturedAt: 5000, tables: [{ ...snapshot2.tables[0], order: "oldestFirst", rows: [...snapshot2.tables[0].rows].reverse() }] };
   assert.equal(applyCapture(db, reversed).added, 0);
   const byPrice = capture(finishedTail, 6000, null);
   const summary = applyCapture(db, byPrice);
@@ -105,5 +105,46 @@ test("running auctions are never stored", () => {
 test("rebuild from captures gives the same result", () => {
   const db = emptyDb();
   db.captures.push(snapshot2, snapshot1);
-  assert.equal(rebuild(db).auctions.length, 11);
+  const rebuilt = rebuild(db).auctions;
+  assert.equal(rebuilt.length, 11);
+  // Seen in both snapshots: dated by the earlier one.
+  assert.equal(rebuilt.find((a) => a.bidder === "sears").firstSeenAt, 1000);
+});
+
+// Builds a list of distinct finished auctions, newest first. Every 3rd one
+// is the same item, price, buyer and bid count, so only position separates them.
+const history = (n, offset = 0) =>
+  Array.from({ length: n }, (_, i) => {
+    const k = n - i + offset;
+    return k % 3 === 0 ? row("Cage", 5, 2222, "Helm (VOID)", 13) : row("Ointment", 10, 3000 + k, "SM18 (Warriors)", 6);
+  });
+const pages = (rows, size) => Array.from({ length: Math.ceil(rows.length / size) }, (_, p) => rows.slice(p * size, (p + 1) * size));
+
+test("page breaks moving between captures don't create duplicates", () => {
+  const db = emptyDb();
+  let t = 0;
+  // Day 1: 40 auctions, captured as pages of 7.
+  for (const page of pages(history(40), 7)) applyCapture(db, capture(page, ++t));
+  // With no overlap at all between pages, an identical auction seen only at a
+  // page top and one seen only at another page's bottom can't be told apart yet.
+  assert.ok(db.auctions.length >= 38 && db.auctions.length <= 40);
+  // Day 2: 5 more finished, every page break has shifted by 5. Capture all again.
+  for (const page of pages(history(45), 7)) applyCapture(db, capture(page, ++t));
+  assert.equal(db.auctions.length, 45);
+  // Day 3: 2 more, capture only some pages, out of order.
+  const day3 = pages(history(47), 7);
+  for (const p of [3, 0, 5]) applyCapture(db, capture(day3[p], ++t));
+  assert.equal(db.auctions.length, 47);
+  assert.equal(db.auctions.filter((a) => a.price === 2222).length, 15);
+});
+
+test("identical neighbours split by a page break, captured before the full view", () => {
+  const a = row("Cage", 5, 2222, "Helm (VOID)", 13);
+  const [P, X, Y, Q] = ["P", "X", "Y", "Q"].map((n) => row(n, 1, 1, "p", 1));
+  const db = emptyDb();
+  applyCapture(db, capture([P, X, a], 1)); // first copy at the bottom of a page
+  applyCapture(db, capture([a, Y, Q], 2)); // second copy at the top of the next
+  applyCapture(db, capture([X, a, a, Y], 3)); // later both visible together
+  assert.equal(db.auctions.length, 6);
+  assert.equal(db.auctions.filter((x) => x.price === 2222).length, 2);
 });

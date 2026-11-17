@@ -8,10 +8,15 @@
 // stay the same across captures, which separates two genuinely different
 // auctions that happen to share the same item, price, buyer and bid count.
 //
-// Matching rule: a captured row is the same auction as a stored one when the
-// signatures are equal and no neighbour that is known on both sides differs.
-// Unknown neighbours (page edges, a still-running neighbour, unsorted list)
-// never conflict, and are filled in once a later capture reveals them.
+// Page breaks move as new auctions finish, so the first and last row of a
+// page are seen with only one neighbour. An unknown neighbour never
+// conflicts. Matching rule: a row is the same auction as a stored one when
+// the signatures are equal and no neighbour known on both sides differs.
+//
+// Auctions are always rebuilt from all raw captures, processing the rows
+// with the most context first (both neighbours known, then one, then none).
+// That way an edge row can't claim the wrong auction just because its
+// capture happened to be taken first.
 
 export const DB_VERSION = 1;
 
@@ -31,12 +36,39 @@ function orderNewestFirst(table) {
   return null;
 }
 
+// One observation per finished row in a capture, with its neighbours.
+function observations(capture) {
+  const result = [];
+  for (const table of capture.tables) {
+    const ordered = orderNewestFirst(table);
+    const rows = ordered || table.rows;
+    // The newest finished row's newer neighbour was a running auction (or is
+    // off-page), so it sits at the edge here and stays unknown.
+    const sigs = rows.map((r) => signature(r, capture.server));
+    rows.forEach((row, i) => {
+      const newer = ordered && i > 0 ? sigs[i - 1] : null;
+      const older = ordered && i < rows.length - 1 ? sigs[i + 1] : null;
+      result.push({
+        captureId: capture.id,
+        server: capture.server,
+        at: capture.capturedAt,
+        row,
+        sig: sigs[i],
+        newer,
+        older,
+        known: (newer !== null) + (older !== null),
+      });
+    });
+  }
+  return result;
+}
+
 function conflicts(a, b) {
   return a !== null && b !== null && a !== b;
 }
 
-function agreement(stored, row) {
-  return (stored.newer !== null && stored.newer === row.newer ? 1 : 0) + (stored.older !== null && stored.older === row.older ? 1 : 0);
+function agreement(stored, obs) {
+  return (stored.newer !== null && stored.newer === obs.newer ? 1 : 0) + (stored.older !== null && stored.older === obs.older ? 1 : 0);
 }
 
 let idCounter = 0;
@@ -45,93 +77,81 @@ function newId() {
   return `a${Date.now().toString(36)}${(idCounter++).toString(36)}`;
 }
 
-// Mutates db. Returns a summary of what happened.
-export function applyCapture(db, capture) {
-  const summary = { finished: 0, added: 0, duplicates: 0, skippedRunning: 0, unordered: false };
+export function buildAuctions(captures) {
+  const all = captures.flatMap(observations);
+  all.sort((a, b) => b.known - a.known || a.at - b.at);
+
+  const auctions = [];
   const bySig = new Map();
-  for (const a of db.auctions) {
-    if (!bySig.has(a.sig)) bySig.set(a.sig, []);
-    bySig.get(a.sig).push(a);
-  }
+  // A capture shows each auction at most once, so two rows of the same
+  // capture can never be the same auction.
+  const usedBy = new Map();
 
-  for (const table of capture.tables) {
-    summary.skippedRunning += table.skippedRunning || 0;
-    const ordered = orderNewestFirst(table);
-    if (!ordered) summary.unordered = true;
-    const rows = ordered || table.rows;
+  for (const obs of all) {
+    const candidates = (bySig.get(obs.sig) || []).filter(
+      (a) => !usedBy.get(a).has(obs.captureId) && !conflicts(a.newer, obs.newer) && !conflicts(a.older, obs.older),
+    );
+    candidates.sort((a, b) => agreement(b, obs) - agreement(a, obs) || a.firstSeenAt - b.firstSeenAt);
+    let auction = candidates[0];
 
-    // The newest finished row's newer neighbour was a running auction (or is
-    // off-page), so it sits at the edge here and stays unknown.
-    const sigs = rows.map((r) => signature(r, capture.server));
-    const finished = [];
-    rows.forEach((r, i) => {
-      finished.push({
-        row: r,
-        sig: sigs[i],
-        newer: ordered && i > 0 ? sigs[i - 1] : null,
-        older: ordered && i < rows.length - 1 ? sigs[i + 1] : null,
-      });
-    });
-    summary.finished += finished.length;
-
-    // Rows with more known neighbours are the least ambiguous; match them first
-    // so they don't lose their record to a vaguer row.
-    finished.sort((x, y) => (y.newer !== null) + (y.older !== null) - ((x.newer !== null) + (x.older !== null)));
-
-    const used = new Set();
-    for (const f of finished) {
-      const candidates = (bySig.get(f.sig) || []).filter(
-        (a) => !used.has(a) && !conflicts(a.newer, f.newer) && !conflicts(a.older, f.older),
-      );
-      candidates.sort((a, b) => agreement(b, f) - agreement(a, f));
-      const match = candidates[0];
-
-      if (match) {
-        used.add(match);
-        match.newer ??= f.newer;
-        match.older ??= f.older;
-        match.lastSeenAt = Math.max(match.lastSeenAt, capture.capturedAt);
-        match.firstSeenAt = Math.min(match.firstSeenAt, capture.capturedAt);
-        match.seenCount += 1;
-        summary.duplicates += 1;
-      } else {
-        const r = f.row;
-        const auction = {
-          id: newId(),
-          sig: f.sig,
-          server: capture.server,
-          itemTypeId: r.itemTypeId,
-          itemName: r.itemName,
-          quantity: r.quantity,
-          price: r.price,
-          unitPrice: r.quantity ? r.price / r.quantity : r.price,
-          bidderRaw: r.bidderRaw,
-          bidder: r.bidder,
-          alliance: r.alliance,
-          bids: r.bids,
-          newer: f.newer,
-          older: f.older,
-          // First time we saw it finished: an upper bound for its finish time.
-          firstSeenAt: capture.capturedAt,
-          lastSeenAt: capture.capturedAt,
-          seenCount: 1,
-        };
-        db.auctions.push(auction);
-        used.add(auction);
-        if (!bySig.has(f.sig)) bySig.set(f.sig, []);
-        bySig.get(f.sig).push(auction);
-        summary.added += 1;
-      }
+    if (auction) {
+      auction.newer ??= obs.newer;
+      auction.older ??= obs.older;
+      auction.firstSeenAt = Math.min(auction.firstSeenAt, obs.at);
+      auction.lastSeenAt = Math.max(auction.lastSeenAt, obs.at);
+      auction.seenCount += 1;
+    } else {
+      const r = obs.row;
+      auction = {
+        id: newId(),
+        sig: obs.sig,
+        server: obs.server,
+        itemTypeId: r.itemTypeId,
+        itemName: r.itemName,
+        quantity: r.quantity,
+        price: r.price,
+        unitPrice: r.quantity ? r.price / r.quantity : r.price,
+        bidderRaw: r.bidderRaw,
+        bidder: r.bidder,
+        alliance: r.alliance,
+        bids: r.bids,
+        newer: obs.newer,
+        older: obs.older,
+        // First time we saw it finished: the page shows no finish time, so
+        // this is the best timestamp we have (an upper bound).
+        firstSeenAt: obs.at,
+        lastSeenAt: obs.at,
+        seenCount: 1,
+      };
+      auctions.push(auction);
+      usedBy.set(auction, new Set());
+      if (!bySig.has(obs.sig)) bySig.set(obs.sig, []);
+      bySig.get(obs.sig).push(auction);
     }
+    usedBy.get(auction).add(obs.captureId);
   }
-  return summary;
+  return auctions;
+}
+
+// Adds a capture to db (mutating it) and recomputes all auctions.
+// Returns a summary of what this capture contributed.
+export function applyCapture(db, capture) {
+  const before = db.auctions.length;
+  db.captures.push(capture);
+  db.auctions = buildAuctions(db.captures);
+  const finished = capture.tables.reduce((n, t) => n + t.rows.length, 0);
+  const added = Math.max(0, db.auctions.length - before);
+  return {
+    finished,
+    added,
+    duplicates: finished - added,
+    skippedRunning: capture.tables.reduce((n, t) => n + (t.skippedRunning || 0), 0),
+    unordered: capture.tables.some((t) => t.rows.length && !orderNewestFirst(t)),
+  };
 }
 
 // Rebuilds all auctions from the stored raw captures. Used after importing,
 // deleting a capture, or if the matching logic is improved later.
 export function rebuild(db) {
-  const fresh = emptyDb();
-  fresh.captures = [...db.captures].sort((a, b) => a.capturedAt - b.capturedAt);
-  for (const c of fresh.captures) applyCapture(fresh, c);
-  return fresh;
+  return { ...db, auctions: buildAuctions(db.captures) };
 }

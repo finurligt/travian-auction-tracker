@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Auction Statistics</title>
+  <link rel="icon" href="../icons/icon.svg">
   <link rel="stylesheet" href="../src/common.css">
   <link rel="stylesheet" href="stats.css">
 </head>
@@ -21,6 +22,21 @@
 
   <main>
     <section class="cards" id="cards"></section>
+
+    <section>
+      <h2>Price development <span class="muted">(per unit, dated by first capture)</span></h2>
+      <div class="toolbar">
+        <label>Item <select id="chartItem"></select></label>
+        <span class="legend">
+          <span><i class="key dot"></i>Auction</span>
+          <span><i class="key line"></i>Daily median</span>
+        </span>
+      </div>
+      <div class="chart" id="chart">
+        <svg id="chartSvg" role="img" aria-label="Price per unit over time"></svg>
+        <div class="tooltip" id="tooltip" hidden></div>
+      </div>
+    </section>
 
     <section>
       <h2>Prices per item <span class="muted">(per unit; click a row to filter the auction list)</span></h2>

@@ -37,7 +37,6 @@ captureBtn.addEventListener("click", async () => {
     capture.id = crypto.randomUUID();
     const db = await loadDb();
     const summary = applyCapture(db, capture);
-    db.captures.push(capture);
     await saveDb(db);
 
     let html = `<b>${summary.added}</b> new, ${summary.duplicates} already known (${summary.finished} finished).<br>` +

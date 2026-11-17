@@ -27,8 +27,12 @@ unlisted add-on on addons.mozilla.org, or use Firefox Developer Edition with
 2. Click the toolbar icon → **Capture auctions on this page**.
 3. Go to other pages of the list yourself and capture them too. Captures can be
    repeated as often as you like; duplicates are removed.
-4. **Open statistics** for per-item prices, top buyers, the auction list, and
-   JSON/CSV export.
+4. **Open statistics** for the price development chart, per-item prices, top buyers,
+   the auction list, and JSON/CSV export.
+
+The page shows no finish time, so each auction is dated by the **first capture that
+showed it finished**. Capture regularly and the dates stay close to the real finish
+times.
 
 Only *finished* auctions are tracked. Running auctions are dropped while the page is
 read and never stored, not even in the raw captures. The parser looks at them only to
@@ -43,6 +47,17 @@ neighbours stay the same. Two rows are treated as the same auction unless a neig
 that is known in both differs. That keeps two identical sales (same buyer, same item,
 same price) apart while still matching rows at page edges. If the list is sorted by
 another column, neighbours are ignored and the popup warns you.
+
+Page breaks move as new auctions finish, so the first and last row of a page are seen
+with only one neighbour; a missing neighbour never counts as a mismatch. After every
+capture all auctions are recomputed from all raw captures, starting with the rows that
+had the most context (both neighbours visible). So a page-edge row gets assigned once
+the full context is known, whichever order you captured the pages in.
+
+One case can't be decided right away: two *identical* auctions where you have only
+ever seen one at the top of a page and the other at the bottom of a different page.
+They may be merged until a later capture shows either of them in the middle of a page.
+That happens on its own as page breaks shift, and the counts then correct themselves.
 
 Every raw capture is kept, so **Rebuild from captures** can recompute everything,
 for example after deleting a bad capture or importing data from another browser.
