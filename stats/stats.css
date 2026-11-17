@@ -254,6 +254,15 @@ button.danger {
   font-size: 11px;
 }
 
+.note {
+  margin: 6px 2px 0;
+  font-size: 12px;
+}
+
+tr.group-start td {
+  border-top: 2px solid var(--border);
+}
+
 .empty {
   padding: 14px;
   color: var(--muted);

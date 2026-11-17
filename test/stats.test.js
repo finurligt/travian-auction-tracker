@@ -19,6 +19,7 @@ test("statistics page renders chart and tables", async () => {
     applyCapture(db, { id: `c${day}`, server: "ts1", capturedAt: start + day * 86400000 + 3600000 * day, tables: [{ order: "newestFirst", rows }] });
   }
   applyCapture(db, { id: "x", server: "ts1", capturedAt: start, tables: [{ order: "newestFirst", rows: [row("Ointment", 10, 3000, "q (B)", 4)] }] });
+  applyCapture(db, { id: "y", server: "ts1", capturedAt: start, tables: [{ order: "newestFirst", rows: [row("Cage", 10, 9000, "r (C)", 9)] }] });
 
   const html = readFileSync(new URL("../stats/stats.html", import.meta.url), "utf8");
   const dom = new JSDOM(html, { url: "https://example.invalid/stats.html" });
@@ -33,12 +34,21 @@ test("statistics page renders chart and tables", async () => {
   await import("../stats/stats.js");
 
   const doc = dom.window.document;
-  assert.equal(doc.querySelectorAll("#chartSvg circle.point").length, 24, "one dot per Cage auction");
+  assert.equal(doc.querySelectorAll("#chartSvg circle.point").length, 25, "one dot per Cage auction");
   assert.ok(doc.querySelector("#chartSvg path.median").getAttribute("d").split("L").length === 6, "six daily medians");
   assert.ok(doc.querySelectorAll("#chartSvg .axis-label").length > 4);
   assert.equal(doc.querySelector("#chartItem").value, "114|Cage");
   assert.equal(doc.querySelectorAll("#items tbody tr").length, 2);
-  assert.equal(doc.querySelectorAll("#auctions tbody tr").length, 25);
+  assert.equal(doc.querySelectorAll("#auctions tbody tr").length, 26);
+
+  // Cage was sold as ×5 (24 sales, ~460/unit) and ×10 (1 sale, 900/unit).
+  const lots = [...doc.querySelectorAll("#lotSizes tbody tr")].map((tr) => [...tr.cells].map((td) => td.textContent));
+  assert.equal(lots.length, 2, "only Cage comes in more than one amount");
+  assert.deepEqual(lots.map((r) => r[1]), ["×5", "×10"]);
+  assert.equal(lots[1][4], "★ best");
+  assert.match(lots[0][4], /^-\d+ %$/);
+  assert.equal(lots[1][7], "few sales – uncertain");
+  assert.equal(lots[0][7], "");
 
   // Switching the item updates the chart and filters the auction list.
   const sel = doc.querySelector("#chartItem");

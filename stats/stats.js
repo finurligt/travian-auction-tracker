@@ -314,6 +314,67 @@ window.addEventListener("resize", () => {
   resizeTimer = setTimeout(() => renderChart(filtered()), 150);
 });
 
+const FEW_SALES = 5;
+
+// Per item, compares the price per unit across the lot sizes it was sold in.
+function lotSizeStats(auctions) {
+  const items = new Map();
+  for (const a of auctions) {
+    const k = itemKey(a);
+    if (!items.has(k)) items.set(k, { name: a.itemName, sizes: new Map() });
+    const sizes = items.get(k).sizes;
+    if (!sizes.has(a.quantity)) sizes.set(a.quantity, []);
+    sizes.get(a.quantity).push(a);
+  }
+  const rows = [];
+  for (const [key, item] of items) {
+    if (item.sizes.size < 2) continue;
+    const sizes = [...item.sizes].map(([quantity, list]) => ({
+      key,
+      name: item.name,
+      quantity,
+      sales: list.length,
+      median: median(list.map((a) => a.unitPrice)),
+      average: list.reduce((n, a) => n + a.price, 0) / list.reduce((n, a) => n + a.quantity, 0),
+      bids: median(list.map((a) => a.bids)),
+    }));
+    const best = Math.max(...sizes.map((s) => s.median));
+    sizes.sort((a, b) => a.quantity - b.quantity);
+    sizes.forEach((s, i) => rows.push({ ...s, vsBest: s.median / best - 1, isBest: s.median === best, first: i === 0 }));
+  }
+  return rows;
+}
+
+function renderLotSizes(auctions) {
+  const rows = lotSizeStats(auctions);
+  renderTable(
+    $("lotSizes"),
+    [
+      { label: "Item", value: (r) => (r.first ? r.name : "") },
+      { label: "Amount", num: true, value: (r) => `×${fmt(r.quantity)}` },
+      { label: "Sales", num: true, value: (r) => fmt(r.sales) },
+      { label: "Median per unit", num: true, value: (r) => fmt(r.median, 1) },
+      { label: "vs best", num: true, value: (r) => (r.isBest ? "★ best" : `${fmt(r.vsBest * 100, 0)} %`) },
+      { label: "Avg per unit", num: true, value: (r) => fmt(r.average, 1) },
+      { label: "Median bids", num: true, value: (r) => fmt(r.bids, 0) },
+      { label: "", value: (r) => (r.sales < FEW_SALES ? "few sales – uncertain" : "") },
+    ],
+    rows,
+    {
+      onClick: (r) => {
+        state.item = r.key;
+        render();
+      },
+      emptyText: "No item has been sold in more than one amount yet.",
+    },
+  );
+  const trs = $("lotSizes").querySelectorAll("tbody tr");
+  rows.forEach((r, i) => {
+    if (r.first && i > 0) trs[i].classList.add("group-start");
+    if (r.sales < FEW_SALES) trs[i].lastElementChild.classList.add("muted");
+  });
+}
+
 function renderBuyers(auctions) {
   const groups = new Map();
   for (const a of auctions) {
@@ -389,6 +450,7 @@ function render() {
   renderCards(auctions);
   renderChart(auctions);
   renderItems(auctions);
+  renderLotSizes(auctions);
   renderBuyers(auctions);
   renderAuctions(auctions);
   renderCaptures();
