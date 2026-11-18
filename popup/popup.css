@@ -25,3 +25,7 @@ button {
 #sync {
   margin: 0 0 8px;
 }
+
+.status .strong {
+  font-weight: 600;
+}

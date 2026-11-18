@@ -6,10 +6,20 @@ const totalsEl = document.getElementById("totals");
 const captureBtn = document.getElementById("capture");
 const syncEl = document.getElementById("sync");
 
-function showStatus(html, kind = "") {
+// Each line is text, or [text, className] for a styled line. Built from
+// text nodes only, never parsed as HTML.
+function showStatus(lines, kind = "") {
   statusEl.hidden = false;
   statusEl.className = `status ${kind}`;
-  statusEl.innerHTML = html;
+  statusEl.replaceChildren(
+    ...lines.map((line) => {
+      const [text, cls] = Array.isArray(line) ? line : [line, ""];
+      const div = document.createElement("div");
+      div.textContent = text;
+      if (cls) div.className = cls;
+      return div;
+    }),
+  );
 }
 
 async function showTotals() {
@@ -27,11 +37,11 @@ captureBtn.addEventListener("click", async () => {
     });
     const capture = injection && injection.result;
     if (!capture || !capture.tables.length) {
-      showStatus("No auction list found. Open <b>Auctions → Your bids</b> and try again.", "error");
+      showStatus(["No auction list found. Open Auctions → Your bids and try again."], "error");
       return;
     }
     if (!capture.tables.some((t) => t.rows.length)) {
-      showStatus("No finished auctions on this page – nothing stored.", "error");
+      showStatus(["No finished auctions on this page – nothing stored."], "error");
       return;
     }
 
@@ -39,25 +49,23 @@ captureBtn.addEventListener("click", async () => {
     const db = await loadDb();
     const summary = applyCapture(db, capture);
     if (!summary.stored) {
-      showStatus(
-        `Nothing new on this page – not stored.<br><span class="muted">${summary.finished} finished auctions, all already known.</span>`,
-        "ok",
-      );
+      showStatus(["Nothing new on this page – not stored.", [`${summary.finished} finished auctions, all already known.`, "muted"]], "ok");
       return;
     }
     await saveDb(db);
 
-    let html = `<b>${summary.added}</b> new, ${summary.duplicates} already known (${summary.finished} finished).<br>` +
-      `<span class="muted">${summary.skippedRunning} still running – not stored.</span>`;
+    const lines = [
+      [`${summary.added} new, ${summary.duplicates} already known (${summary.finished} finished).`, "strong"],
+      [`${summary.skippedRunning} still running – not stored.`, "muted"],
+    ];
     if (summary.unordered) {
-      html += "<br><span class=\"warn\">List isn't sorted by Finish, so duplicate detection is weaker. Sort by Finish for best results.</span>";
+      lines.push(["List isn't sorted by Finish, so duplicate detection is weaker. Sort by Finish for best results.", "warn"]);
     }
-    showStatus(html, "ok");
+    showStatus(lines, "ok");
     await showTotals();
     await sync();
   } catch (e) {
-    showStatus("", "error");
-    statusEl.textContent = `Capture failed: ${e.message}`;
+    showStatus([`Capture failed: ${e.message}`], "error");
   } finally {
     captureBtn.disabled = false;
   }

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Travian Auction Tracker",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Manually capture finished Travian auctions from the page you are looking at and keep statistics. Read-only: never clicks or changes anything on the page.",
   "permissions": [
     "activeTab",
@@ -17,12 +17,15 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "travian-auction-tracker@local",
-      "strict_min_version": "115.0",
+      "strict_min_version": "140.0",
       "data_collection_permissions": {
         "required": [
           "none"
         ]
       }
+    },
+    "gecko_android": {
+      "strict_min_version": "142.0"
     }
   },
   "icons": {
