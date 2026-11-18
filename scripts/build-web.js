@@ -11,7 +11,7 @@ rmSync(out, { recursive: true, force: true });
 mkdirSync(to("src/"), { recursive: true });
 cpSync(from("stats/"), to("stats/"), { recursive: true });
 cpSync(from("icons/"), to("icons/"), { recursive: true });
-for (const f of ["common.css", "dedup.js"]) cpSync(from(`src/${f}`), to(`src/${f}`));
+for (const f of ["common.css", "dedup.js", "serverAge.js"]) cpSync(from(`src/${f}`), to(`src/${f}`));
 cpSync(from("web/platform.js"), to("src/platform.js"));
 
 // Serve the page at "/" instead of /stats/stats.html.

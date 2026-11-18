@@ -21,6 +21,8 @@ test("statistics page renders chart and tables", async () => {
   applyCapture(db, { id: "x", server: "ts1", capturedAt: start, tables: [{ order: "newestFirst", rows: [row("Ointment", 10, 3000, "q (B)", 4)] }] });
   applyCapture(db, { id: "y", server: "ts1", capturedAt: start, tables: [{ order: "newestFirst", rows: [row("Cage", 10, 9000, "r (C)", 9)] }] });
 
+  // Round ends on day 7, so the Cage sale on Nov 15 (day 8) is outside it.
+  db.serverRounds = { ts1: { rounds: [{ start: "2026-11-08", end: "2026-11-14" }], updatedAt: 1 } };
   const html = readFileSync(new URL("../stats/stats.html", import.meta.url), "utf8");
   const dom = new JSDOM(html, { url: "https://example.invalid/stats.html" });
   const g = globalThis;
@@ -49,6 +51,40 @@ test("statistics page renders chart and tables", async () => {
   assert.match(lots[0][4], /^-\d+ %$/);
   assert.equal(lots[1][7], "few sales – uncertain");
   assert.equal(lots[0][7], "");
+
+  // Server age: one round, Cage sold on days 3..8 of it.
+  const agePoints = doc.querySelectorAll("#ageSvg circle.age-point");
+  assert.equal(agePoints.length, 5);
+  assert.match(doc.querySelector("#ageNote").textContent, /4 sales of this item fall outside every round/);
+  assert.equal(doc.querySelectorAll("#ageSvg path.age-line").length, 1);
+  assert.match(doc.querySelector("#ageLegend").textContent, /ts1 · 2026-11-08/);
+  assert.ok([...doc.querySelectorAll("#ageSvg .axis-label")].some((t) => /^Day \d+$/.test(t.textContent)));
+  const serverRows = [...doc.querySelectorAll("#servers tbody tr")];
+  assert.equal(serverRows.length, 1);
+  assert.deepEqual([...serverRows[0].querySelectorAll("input[type=date]")].map((i) => i.value), ["2026-11-08", "2026-11-14"]);
+
+  // Editing: an end before the start is refused, a valid new round is saved.
+  const saved = [];
+  g.browser.storage.local.set = async (v) => saved.push(v);
+  const cell = serverRows[0];
+  const buttons = () => Object.fromEntries([...cell.querySelectorAll("button")].map((b) => [b.textContent, b]));
+  buttons()["Add round"].click();
+  const rows = cell.querySelectorAll(".round");
+  assert.equal(rows.length, 2);
+  const [newStart, newEnd] = rows[1].querySelectorAll("input");
+  newStart.value = "2026-11-20";
+  newEnd.value = "2026-11-19";
+  buttons().Save.click();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.match(cell.querySelector(".round-actions .warn").textContent, /ends before it starts/);
+  assert.equal(saved.length, 0);
+  newEnd.value = "";
+  buttons().Save.click();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(saved.at(-1).db.serverRounds.ts1.rounds, [
+    { start: "2026-11-08", end: "2026-11-14" },
+    { start: "2026-11-20", end: null },
+  ]);
 
   // Switching the item updates the chart and filters the auction list.
   const sel = doc.querySelector("#chartItem");

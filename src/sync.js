@@ -3,6 +3,7 @@
 // deletions, and downloads what other PCs added or deleted since last time.
 // Auctions are then rebuilt locally from the merged captures.
 import { rebuild } from "./dedup.js";
+import { mergeServerRounds } from "./serverAge.js";
 
 const UPLOAD_BATCH = 50;
 const DELETE_BATCH = 200;
@@ -34,7 +35,8 @@ function client(settings, fetchImpl) {
 // Talks to the server. Doesn't touch local storage: returns what to change,
 // so the caller can apply it to a freshly loaded db (a capture may have been
 // made while this was running).
-export async function exchange(localCaptures, settings, fetchImpl = fetch) {
+export async function exchange(db, settings, fetchImpl = fetch) {
+  const localCaptures = db.captures;
   const call = client(settings, fetchImpl);
   const synced = new Set(settings.synced || []);
   const pendingDeletes = settings.pendingDeletes || [];
@@ -70,7 +72,11 @@ export async function exchange(localCaptures, settings, fetchImpl = fetch) {
     if (!result.more) break;
   }
 
+  // Start dates are tiny: send them all, get back the merged set.
+  const serverRounds = await call("POST", "/api/servers", db.serverRounds || {});
+
   return {
+    serverRounds,
     incoming: [...incoming.values()],
     removed: [...removed],
     settings: {
@@ -95,6 +101,8 @@ export function applyExchange(db, result) {
   const removedCount = db.captures.length - kept.length;
   result.summary.downloaded = added.length;
   result.summary.removedLocally = removedCount;
-  if (!added.length && !removedCount) return db;
-  return rebuild({ ...db, captures: [...kept, ...added] });
+  const serverRounds = mergeServerRounds(db.serverRounds, result.serverRounds);
+  const startsChanged = JSON.stringify(serverRounds) !== JSON.stringify(db.serverRounds || {});
+  if (!added.length && !removedCount) return startsChanged ? { ...db, serverRounds } : db;
+  return rebuild({ ...db, serverRounds, captures: [...kept, ...added] });
 }

@@ -1,5 +1,5 @@
 import { PGlite } from "@electric-sql/pglite";
-import { createHandler } from "../lib/handler.js";
+import { createHandler, createServersHandler } from "../lib/handler.js";
 import { createStore } from "../lib/store.js";
 
 export const TOKEN = "test-token";
@@ -10,7 +10,7 @@ export async function memoryStore() {
 }
 
 // Calls the handler the way Vercel does: parsed JSON body and query string.
-export async function call(handler, { method = "GET", query = {}, body, token = TOKEN } = {}) {
+export async function call(handler, { method = "GET", path = "/api/captures", query = {}, body, token = TOKEN } = {}) {
   const res = {
     statusCode: 200,
     headers: {},
@@ -21,7 +21,7 @@ export async function call(handler, { method = "GET", query = {}, body, token = 
     end() { return this; },
   };
   const headers = token ? { authorization: `Bearer ${token}` } : {};
-  await handler({ method, query, body, headers }, res);
+  await handler({ method, path, query, body, headers }, res);
   return res;
 }
 
@@ -31,6 +31,7 @@ export function fetchFor(handler) {
     const u = new URL(url);
     const token = (init.headers?.Authorization || "").replace(/^Bearer /, "");
     const res = await call(handler, {
+      path: u.pathname,
       method: init.method || "GET",
       query: Object.fromEntries(u.searchParams),
       body: init.body ? JSON.parse(init.body) : undefined,
@@ -40,8 +41,12 @@ export function fetchFor(handler) {
   };
 }
 
+// Routes like Vercel does: one handler per file in api/.
 export async function server() {
-  return createHandler({ store: await memoryStore(), token: TOKEN });
+  const store = await memoryStore();
+  const captures = createHandler({ store, token: TOKEN });
+  const servers = createServersHandler({ store, token: TOKEN });
+  return (req, res) => (req.path === "/api/servers" ? servers : captures)(req, res);
 }
 
 export const capture = (id, capturedAt = 1000, price = 100) => ({

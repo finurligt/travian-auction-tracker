@@ -21,7 +21,7 @@
 export const DB_VERSION = 1;
 
 export function emptyDb() {
-  return { version: DB_VERSION, auctions: [], captures: [] };
+  return { version: DB_VERSION, auctions: [], captures: [], serverRounds: {} };
 }
 
 export function signature(row, server) {
@@ -133,15 +133,28 @@ export function buildAuctions(captures) {
   return auctions;
 }
 
-// Adds a capture to db (mutating it) and recomputes all auctions.
+// What the auctions say, ignoring ids and "last seen" bookkeeping: if this
+// doesn't change, a capture added nothing.
+function fingerprint(auctions) {
+  return auctions.map((a) => `${a.sig}|${a.newer}|${a.older}|${a.firstSeenAt}`).sort().join("\n");
+}
+
+// Adds a capture to db (mutating it) and recomputes all auctions. A capture
+// that changes nothing (no new auction, no new neighbour information) isn't
+// stored, so capturing an unchanged page again costs nothing.
 // Returns a summary of what this capture contributed.
 export function applyCapture(db, capture) {
-  const before = db.auctions.length;
-  db.captures.push(capture);
-  db.auctions = buildAuctions(db.captures);
+  const before = db.auctions;
+  const auctions = buildAuctions([...db.captures, capture]);
   const finished = capture.tables.reduce((n, t) => n + t.rows.length, 0);
-  const added = Math.max(0, db.auctions.length - before);
+  const stored = fingerprint(auctions) !== fingerprint(before);
+  if (stored) {
+    db.captures.push(capture);
+    db.auctions = auctions;
+  }
+  const added = Math.max(0, auctions.length - before.length);
   return {
+    stored,
     finished,
     added,
     duplicates: finished - added,

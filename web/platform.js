@@ -50,8 +50,8 @@ export async function loadDb() {
     throw new LoginRequired("Wrong token.");
   }
   if (!response.ok) throw new Error(`The server answered ${response.status}.`);
-  const { auctions, captureCount } = await response.json();
-  return { ...emptyDb(), auctions, captureCount };
+  const { auctions, captureCount, serverRounds } = await response.json();
+  return { ...emptyDb(), auctions, captureCount, serverRounds: serverRounds || {} };
 }
 
 export async function saveDb() {}

@@ -50,11 +50,14 @@ const snapshot2 = capture([
 
 test("the user's two snapshots: only the newly finished auctions are added", () => {
   const db = emptyDb();
-  assert.deepEqual(applyCapture(db, snapshot1), { finished: 8, added: 8, duplicates: 0, skippedRunning: 4, unordered: false });
-  assert.deepEqual(applyCapture(db, snapshot2), { finished: 11, added: 3, duplicates: 8, skippedRunning: 2, unordered: false });
+  assert.deepEqual(applyCapture(db, snapshot1), { stored: true, finished: 8, added: 8, duplicates: 0, skippedRunning: 4, unordered: false });
+  assert.deepEqual(applyCapture(db, snapshot2), { stored: true, finished: 11, added: 3, duplicates: 8, skippedRunning: 2, unordered: false });
   assert.equal(db.auctions.length, 11);
-  // Capturing the same page again changes nothing.
-  assert.equal(applyCapture(db, { ...snapshot2, id: "again", capturedAt: 3000 }).added, 0);
+  // Capturing the same page again changes nothing, so it isn't stored.
+  const again = applyCapture(db, { ...snapshot2, id: "again", capturedAt: 3000 });
+  assert.equal(again.stored, false);
+  assert.equal(again.added, 0);
+  assert.equal(db.captures.length, 2);
   assert.equal(db.auctions.length, 11);
 });
 
@@ -147,4 +150,20 @@ test("identical neighbours split by a page break, captured before the full view"
   applyCapture(db, capture([X, a, a, Y], 3)); // later both visible together
   assert.equal(db.auctions.length, 6);
   assert.equal(db.auctions.filter((x) => x.price === 2222).length, 2);
+});
+
+test("a capture with only known auctions is kept if it adds neighbour context", () => {
+  const [A, B, C, D] = ["A", "B", "C", "D"].map((n, i) => row(n, 1, i + 1, "p", 1));
+  const db = emptyDb();
+  applyCapture(db, capture([A, B], 1)); // B seen at the page bottom: older neighbour unknown
+  applyCapture(db, capture([C, D], 2)); // C seen at the page top: newer neighbour unknown
+  // Page breaks moved: B and C now seen together. Nothing new, but B's older and
+  // C's newer neighbour become known.
+  const shifted = applyCapture(db, capture([B, C], 3));
+  assert.equal(shifted.added, 0);
+  assert.equal(shifted.stored, true);
+  assert.equal(db.captures.length, 3);
+  // The same view again adds nothing.
+  assert.equal(applyCapture(db, capture([B, C], 4)).stored, false);
+  assert.equal(db.captures.length, 3);
 });

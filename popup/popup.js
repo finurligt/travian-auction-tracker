@@ -38,6 +38,13 @@ captureBtn.addEventListener("click", async () => {
     capture.id = crypto.randomUUID();
     const db = await loadDb();
     const summary = applyCapture(db, capture);
+    if (!summary.stored) {
+      showStatus(
+        `Nothing new on this page – not stored.<br><span class="muted">${summary.finished} finished auctions, all already known.</span>`,
+        "ok",
+      );
+      return;
+    }
     await saveDb(db);
 
     let html = `<b>${summary.added}</b> new, ${summary.duplicates} already known (${summary.finished} finished).<br>` +

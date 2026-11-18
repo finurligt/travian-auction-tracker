@@ -10,7 +10,7 @@ function pc(fetchImpl) {
     db: emptyDb(),
     settings: { url: "https://sync.example/", token: TOKEN, lastSeq: 0, synced: [], pendingDeletes: [] },
     async sync() {
-      const result = await exchange(self.db.captures, self.settings, fetchImpl);
+      const result = await exchange(self.db, self.settings, fetchImpl);
       self.db = applyExchange(self.db, result);
       self.settings = result.settings;
       return result.summary;
@@ -65,4 +65,22 @@ test("pulls more than one page", async () => {
   await home.sync();
   const work = pc(fetchImpl);
   assert.equal((await work.sync()).downloaded, 450);
+});
+
+test("server rounds sync between PCs", async () => {
+  const fetchImpl = fetchFor(await server());
+  const home = pc(fetchImpl);
+  const work = pc(fetchImpl);
+  const host = "ts1.x1.europe.travian.com";
+  home.db.serverRounds = { [host]: { rounds: [{ start: "2026-11-15", end: null }], updatedAt: 100 } };
+  await home.sync();
+  await work.sync();
+  assert.deepEqual(work.db.serverRounds, home.db.serverRounds);
+
+  // The round ends and a new one starts, entered on work: home picks it up.
+  const rounds = [{ start: "2026-11-15", end: "2027-02-20" }, { start: "2027-03-01", end: null }];
+  work.db.serverRounds = { [host]: { rounds, updatedAt: 200 } };
+  await work.sync();
+  await home.sync();
+  assert.deepEqual(home.db.serverRounds[host].rounds, rounds);
 });

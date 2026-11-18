@@ -3,11 +3,14 @@
 //   GET  /api/captures?after=<seq>   captures added or deleted after <seq>
 //   POST /api/captures               { add: [capture...], delete: [id...] }
 //   GET  /api/auctions               de-duplicated auctions, for the web page
+//   GET  /api/servers                rounds (start/end dates) per game server
+//   POST /api/servers                { "<host>": { rounds: [{ start, end }], updatedAt } }
 //
 // Requests need "Authorization: Bearer <token>": SYNC_TOKEN for everything,
 // or the optional read-only VIEW_TOKEN for /api/auctions.
 import { createHash, timingSafeEqual } from "node:crypto";
 import { buildAuctions } from "../../src/dedup.js";
+import { validateRounds } from "../../src/serverAge.js";
 
 export const PAGE_SIZE = 200;
 const MAX_BATCH = 200;
@@ -95,9 +98,56 @@ export function createAuctionsHandler({ store, token, viewToken }) {
     if (!authorized(req.headers.authorization, token, viewToken)) return res.status(401).json({ error: "unauthorized" });
     if (req.method !== "GET") return res.status(405).json({ error: "method not allowed" });
     try {
-      const captures = await store.all();
+      const [captures, serverRounds] = await Promise.all([store.all(), store.serverRounds()]);
       const auctions = buildAuctions(captures).map((a) => Object.fromEntries(PUBLIC_FIELDS.map((f) => [f, a[f]])));
-      return res.status(200).json({ auctions, captureCount: captures.length });
+      return res.status(200).json({ auctions, captureCount: captures.length, serverRounds });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ error: "server error" });
+    }
+  };
+}
+
+// Same rules as the extension's form, and stored exactly as validated.
+function validRounds(rounds) {
+  if (!Array.isArray(rounds) || rounds.length > 100) return false;
+  if (!rounds.every((r) => r && typeof r === "object" && Object.keys(r).length === 2 && "start" in r && "end" in r)) return false;
+  try {
+    return JSON.stringify(validateRounds(rounds)) === JSON.stringify(rounds);
+  } catch {
+    return false;
+  }
+}
+
+function validServerRounds(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return false;
+  const entries = Object.entries(body);
+  return (
+    entries.length <= 100 &&
+    entries.every(
+      ([host, e]) =>
+        host.length > 0 &&
+        host.length <= 200 &&
+        e &&
+        validRounds(e.rounds) &&
+        Number.isSafeInteger(e.updatedAt),
+    )
+  );
+}
+
+export function createServersHandler({ store, token }) {
+  return async function handler(req, res) {
+    setCommonHeaders(res, "GET, POST, OPTIONS");
+    if (req.method === "OPTIONS") return res.status(204).end();
+    if (!authorized(req.headers.authorization, token)) return res.status(401).json({ error: "unauthorized" });
+    try {
+      if (req.method === "POST") {
+        if (!validServerRounds(req.body)) return res.status(400).json({ error: "invalid server rounds" });
+        await store.saveServerRounds(req.body);
+      } else if (req.method !== "GET") {
+        return res.status(405).json({ error: "method not allowed" });
+      }
+      return res.status(200).json(await store.serverRounds());
     } catch (e) {
       console.error(e);
       return res.status(500).json({ error: "server error" });

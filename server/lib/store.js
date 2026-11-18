@@ -19,6 +19,13 @@ const SCHEMA = [
     received_at timestamptz not null default now()
   )`,
   "create index if not exists captures_seq_idx on captures (seq)",
+  // Rounds (start and end dates) per game server, see src/serverAge.js.
+  // The last edit wins.
+  `create table if not exists server_rounds (
+    host text primary key,
+    rounds jsonb not null,
+    updated_at bigint not null
+  )`,
 ];
 
 export function createStore(query) {
@@ -66,6 +73,24 @@ export function createStore(query) {
         removed += rows.length;
       }
       return removed;
+    },
+
+    async serverRounds() {
+      await ensureSchema();
+      const rows = await query("select host, rounds, updated_at::text as updated_at from server_rounds");
+      return Object.fromEntries(rows.map((r) => [r.host, { rounds: r.rounds, updatedAt: Number(r.updated_at) }]));
+    },
+
+    async saveServerRounds(entries) {
+      await ensureSchema();
+      for (const [host, { rounds, updatedAt }] of Object.entries(entries)) {
+        await query(
+          `insert into server_rounds (host, rounds, updated_at) values ($1, $2::jsonb, $3::bigint)
+           on conflict (host) do update set rounds = excluded.rounds, updated_at = excluded.updated_at
+           where excluded.updated_at > server_rounds.updated_at`,
+          [host, JSON.stringify(rounds), updatedAt],
+        );
+      }
     },
 
     async all() {

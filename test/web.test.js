@@ -24,7 +24,7 @@ test("web version: login, read-only statistics, logout", async () => {
   g.fetch = async (url, init) => {
     requests.push([url, init.headers.Authorization]);
     const ok = init.headers.Authorization === "Bearer secret";
-    return { ok, status: ok ? 200 : 401, json: async () => ({ auctions, captureCount: 4 }) };
+    return { ok, status: ok ? 200 : 401, json: async () => ({ auctions, captureCount: 4, serverRounds: { ts1: { rounds: [{ start: "2026-11-01", end: null }], updatedAt: 1 } } }) };
   };
 
   await import(new URL("dist-web/stats/stats.js", root));
@@ -50,6 +50,9 @@ test("web version: login, read-only statistics, logout", async () => {
   assert.equal(doc.querySelectorAll("#lotSizes tbody tr").length, 2);
   assert.match(doc.querySelector("#cards").textContent, /Captures4/);
   assert.ok(doc.querySelector("section.edit-only"), "data section is marked edit-only (hidden by CSS)");
+  assert.equal(doc.querySelectorAll("#ageSvg circle.age-point").length, 6);
+  const serverCells = [...doc.querySelectorAll("#servers tbody td")].map((td) => td.textContent);
+  assert.deepEqual(serverCells, ["ts1", "?", "2026-11-01 – running", "6"], "read-only: plain text, no inputs");
 
   doc.querySelector("#logout").click();
   assert.ok(doc.body.classList.contains("logged-out"));

@@ -146,6 +146,7 @@ button.danger {
 :root {
   --series-1: #2a78d6;
   --series-2: #eb6834;
+  --series-3: #1baf7a;
   --grid: #ebe7df;
 }
 
@@ -153,6 +154,7 @@ button.danger {
   :root {
     --series-1: #3987e5;
     --series-2: #d95926;
+    --series-3: #199e70;
     --grid: #34322d;
   }
 }
@@ -164,10 +166,71 @@ button.danger {
   border-radius: 8px;
 }
 
-#chartSvg {
+#chartSvg,
+#ageSvg {
   display: block;
   width: 100%;
   height: 280px;
+}
+
+#ageSvg .grid {
+  stroke: var(--grid);
+  stroke-width: 1;
+}
+
+#ageSvg .axis-label {
+  fill: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+#ageSvg .empty-label {
+  fill: var(--muted);
+  font-size: 13px;
+}
+
+#ageSvg .age-line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+#ageSvg .age-point {
+  stroke: var(--panel);
+  stroke-width: 2;
+}
+
+#ageSvg .age-point.hover {
+  stroke: var(--fg);
+}
+
+.s1 { --series: var(--series-1); }
+.s2 { --series: var(--series-2); }
+.s3 { --series: var(--series-3); }
+
+#ageSvg .age-line { stroke: var(--series); }
+#ageSvg .age-point { fill: var(--series); }
+.key.line.series { background: var(--series); }
+
+.servers-input {
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.rounds .round,
+.rounds .round-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 0;
+}
+
+.rounds button {
+  padding: 3px 8px;
 }
 
 #chartSvg .grid {

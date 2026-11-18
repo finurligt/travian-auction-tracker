@@ -9,7 +9,7 @@ async function runSync() {
   const settings = await loadSync();
   if (!isConfigured(settings)) return { ok: true, skipped: true };
   try {
-    const result = await exchange((await loadDb()).captures, settings);
+    const result = await exchange(await loadDb(), settings);
     const latest = await loadSync();
     // Settings changed to another server meanwhile: drop this result.
     if (latest.url !== settings.url || latest.token !== settings.token) return runSync();

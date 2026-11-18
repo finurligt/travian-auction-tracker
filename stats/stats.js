@@ -1,4 +1,5 @@
 import { emptyDb, rebuild } from "../src/dedup.js";
+import { serverAge, serverSpeed, validateRounds } from "../src/serverAge.js";
 import {
   isConfigured,
   loadDb,
@@ -14,7 +15,7 @@ import {
 } from "../src/platform.js";
 
 const $ = (id) => document.getElementById(id);
-const state = { db: emptyDb(), server: "", sinceDays: 0, item: null, search: "" };
+const state = { db: emptyDb(), server: "", sinceDays: 0, item: null, search: "", ageScale: false };
 
 const fmt = (n, digits = 0) =>
   n === null || n === undefined || Number.isNaN(n) ? "–" : n.toLocaleString(undefined, { maximumFractionDigits: digits, minimumFractionDigits: digits });
@@ -323,7 +324,10 @@ $("chartItem").addEventListener("change", (e) => {
 let resizeTimer;
 window.addEventListener("resize", () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => renderChart(filtered()), 150);
+  resizeTimer = setTimeout(() => {
+    renderChart(filtered());
+    renderAgeChart(filtered());
+  }, 150);
 });
 
 const FEW_SALES = 5;
@@ -355,6 +359,253 @@ function lotSizeStats(auctions) {
     sizes.forEach((s, i) => rows.push({ ...s, vsBest: s.median / best - 1, isBest: s.median === best, first: i === 0 }));
   }
   return rows;
+}
+
+const MAX_AGE_SERIES = 3;
+let agePoints = [];
+
+function ageX(age) {
+  return state.ageScale && age.speed ? age.day * age.speed : age.day;
+}
+
+function renderAgeChart(auctions) {
+  const groups = new Map();
+  for (const a of auctions) {
+    const k = itemKey(a);
+    if (!groups.has(k)) groups.set(k, { key: k, name: a.itemName, count: 0 });
+    groups.get(k).count += 1;
+  }
+  const options = [...groups.values()].sort((a, b) => b.count - a.count);
+  const key = state.item && groups.has(state.item) ? state.item : options[0]?.key;
+  const sel = $("ageItem");
+  sel.replaceChildren(...options.map((g) => new Option(`${g.name} (${g.count})`, g.key)));
+  if (key) sel.value = key;
+
+  // One series per server round, with the median per day of the round.
+  const series = new Map();
+  let unknownAge = 0;
+  for (const a of auctions) {
+    if (itemKey(a) !== key) continue;
+    const age = serverAge(state.db.serverRounds, a.server, a.firstSeenAt);
+    if (!age) {
+      unknownAge += 1;
+      continue;
+    }
+    const id = `${a.server}|${age.round}`;
+    if (!series.has(id)) series.set(id, { label: `${a.server.replace(/\.travian\.com$/, "")} · ${age.round}`, days: new Map(), count: 0 });
+    const s = series.get(id);
+    const x = ageX(age);
+    if (!s.days.has(x)) s.days.set(x, []);
+    s.days.get(x).push(a.unitPrice);
+    s.count += 1;
+  }
+  const all = [...series.values()].sort((a, b) => b.count - a.count);
+  const shown = all.slice(0, MAX_AGE_SERIES).map((s, i) => ({
+    ...s,
+    cls: `s${i + 1}`,
+    points: [...s.days].map(([x, v]) => ({ x, v: median(v), n: v.length })).sort((a, b) => a.x - b.x),
+  }));
+
+  const notes = [];
+  if (all.length > MAX_AGE_SERIES) notes.push(`Showing the ${MAX_AGE_SERIES} server rounds with the most sales (of ${all.length}).`);
+  if (unknownAge) notes.push(`${unknownAge} sales of this item fall outside every round you've entered.`);
+  $("ageNote").textContent = notes.join(" ");
+
+  $("ageLegend").replaceChildren(
+    ...shown.map((s) => {
+      const span = document.createElement("span");
+      span.className = s.cls;
+      const key = span.appendChild(document.createElement("i"));
+      key.className = "key line series";
+      span.append(s.label);
+      return span;
+    }),
+  );
+
+  const svg = $("ageSvg");
+  svg.replaceChildren();
+  $("ageTooltip").hidden = true;
+  agePoints = [];
+  const width = svg.clientWidth || 800;
+  const height = svg.clientHeight || 280;
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+
+  if (!shown.length) {
+    const msg = readOnly ? "No server rounds yet. Add them in the extension." : "Add the server's rounds under Servers below.";
+    svgEl(svg, "text", { x: width / 2, y: height / 2, "text-anchor": "middle", class: "empty-label" }).textContent = msg;
+    return;
+  }
+
+  const m = { left: 52, right: 18, top: 14, bottom: 28 };
+  const xs = shown.flatMap((s) => s.points.map((p) => p.x));
+  let [x0, x1] = [Math.min(...xs), Math.max(...xs)];
+  if (x1 - x0 < 2) [x0, x1] = [x0 - 1, x1 + 1];
+  x0 = Math.max(0, x0);
+  const yMaxRaw = Math.max(...shown.flatMap((s) => s.points.map((p) => p.v))) || 1;
+  const yStep = niceStep(yMaxRaw, 5);
+  const yMax = Math.ceil((yMaxRaw * 1.05) / yStep) * yStep;
+  const x = (d) => m.left + ((d - x0) / (x1 - x0)) * (width - m.left - m.right);
+  const y = (v) => height - m.bottom - (v / yMax) * (height - m.top - m.bottom);
+
+  for (let v = 0; v <= yMax + 1e-9; v += yStep) {
+    svgEl(svg, "line", { x1: m.left, x2: width - m.right, y1: y(v), y2: y(v), class: "grid" });
+    svgEl(svg, "text", { x: m.left - 8, y: y(v) + 4, "text-anchor": "end", class: "axis-label" }).textContent = fmt(v, yStep < 1 ? 1 : 0);
+  }
+  const xStep = Math.max(1, niceStep(x1 - x0, Math.max(2, Math.floor((width - m.left - m.right) / 80))));
+  for (let d = Math.ceil(x0 / xStep) * xStep; d <= x1; d += xStep) {
+    svgEl(svg, "text", { x: x(d), y: height - 8, "text-anchor": "middle", class: "axis-label" }).textContent = `Day ${fmt(d)}`;
+  }
+
+  for (const s of shown) {
+    const g = svgEl(svg, "g", { class: s.cls });
+    if (s.points.length > 1) {
+      svgEl(g, "path", { class: "age-line", d: s.points.map((p, i) => `${i ? "L" : "M"}${x(p.x)},${y(p.v)}`).join(" ") });
+    }
+    for (const p of s.points) {
+      const el = svgEl(g, "circle", { cx: x(p.x), cy: y(p.v), r: 4, class: "age-point" });
+      agePoints.push({ px: x(p.x), py: y(p.v), p, s, el });
+    }
+  }
+}
+
+function showAgeTooltip(e) {
+  const svg = $("ageSvg");
+  const rect = svg.getBoundingClientRect();
+  const scale = rect.width / (svg.viewBox.baseVal.width || rect.width);
+  const mx = (e.clientX - rect.left) / scale;
+  const my = (e.clientY - rect.top) / scale;
+  let best = null;
+  let bestDist = 24;
+  for (const point of agePoints) {
+    point.el.classList.remove("hover");
+    const d = Math.hypot(point.px - mx, point.py - my);
+    if (d < bestDist) [best, bestDist] = [point, d];
+  }
+  const tip = $("ageTooltip");
+  if (!best) {
+    tip.hidden = true;
+    return;
+  }
+  best.el.classList.add("hover");
+  const line = (text, cls) => {
+    const div = document.createElement("div");
+    div.textContent = text;
+    if (cls) div.className = cls;
+    return div;
+  };
+  tip.replaceChildren(
+    line(best.s.label),
+    line(`${state.ageScale ? "Scaled day" : "Day"} ${fmt(best.p.x)}: ${fmt(best.p.v, 1)} per unit`),
+    line(`median of ${best.p.n} sale${best.p.n === 1 ? "" : "s"}`, "muted"),
+  );
+  tip.hidden = false;
+  const box = $("ageChart").getBoundingClientRect();
+  const left = best.px * scale + 12;
+  tip.style.left = `${left + tip.offsetWidth > box.width ? best.px * scale - tip.offsetWidth - 12 : left}px`;
+  tip.style.top = `${Math.max(4, best.py * scale - tip.offsetHeight / 2)}px`;
+}
+
+$("ageSvg").addEventListener("pointermove", showAgeTooltip);
+$("ageSvg").addEventListener("pointerleave", () => {
+  $("ageTooltip").hidden = true;
+  for (const p of agePoints) p.el.classList.remove("hover");
+});
+$("ageItem").addEventListener("change", (e) => {
+  state.item = e.target.value;
+  render();
+});
+$("ageScale").addEventListener("change", (e) => {
+  state.ageScale = e.target.checked;
+  renderAgeChart(filtered());
+});
+
+async function saveServerRounds(host, rounds, statusEl) {
+  let cleaned;
+  try {
+    cleaned = validateRounds(rounds);
+  } catch (e) {
+    statusEl.textContent = e.message;
+    return;
+  }
+  const db = await loadDb();
+  db.serverRounds = { ...db.serverRounds, [host]: { rounds: cleaned, updatedAt: Date.now() } };
+  await commit(db, "");
+  runSync();
+}
+
+const roundText = (r) => `${r.start} – ${r.end ?? "running"}`;
+
+// Editable list of rounds for one server: start and end date per round.
+function roundsEditor(host, rounds) {
+  const wrap = document.createElement("div");
+  wrap.className = "rounds";
+  const list = wrap.appendChild(document.createElement("div"));
+
+  const dateInput = (value, label) => {
+    const input = document.createElement("input");
+    input.type = "date";
+    input.className = "servers-input";
+    input.value = value || "";
+    input.setAttribute("aria-label", label);
+    return input;
+  };
+  const addRow = (round = { start: "", end: null }) => {
+    const row = list.appendChild(document.createElement("div"));
+    row.className = "round";
+    row.append(dateInput(round.start, `Round start for ${host}`), " – ", dateInput(round.end, `Round end for ${host} (empty while running)`));
+    const remove = row.appendChild(document.createElement("button"));
+    remove.type = "button";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", () => row.remove());
+  };
+  for (const r of rounds) addRow(r);
+  if (!rounds.length) addRow();
+
+  const actions = wrap.appendChild(document.createElement("div"));
+  actions.className = "round-actions";
+  const add = actions.appendChild(document.createElement("button"));
+  add.type = "button";
+  add.textContent = "Add round";
+  add.addEventListener("click", () => addRow());
+  const save = actions.appendChild(document.createElement("button"));
+  save.type = "button";
+  save.textContent = "Save";
+  const status = actions.appendChild(document.createElement("span"));
+  status.className = "warn";
+  save.addEventListener("click", () => {
+    const entered = [...list.querySelectorAll(".round")].map((row) => {
+      const [startInput, endInput] = row.querySelectorAll("input");
+      return { start: startInput.value, end: endInput.value };
+    });
+    saveServerRounds(host, entered, status);
+  });
+  return wrap;
+}
+
+function renderServerTable() {
+  // Don't throw away a half-filled form when a sync re-renders the page.
+  if ($("servers").contains(document.activeElement)) return;
+  const all = state.db.serverRounds || {};
+  const counts = new Map();
+  for (const a of state.db.auctions) counts.set(a.server, (counts.get(a.server) || 0) + 1);
+  const hosts = [...new Set([...counts.keys(), ...Object.keys(all)])].sort();
+  renderTable(
+    $("servers"),
+    [
+      { label: "Server", value: (h) => h },
+      { label: "Speed", num: true, value: (h) => (serverSpeed(h) ? `${serverSpeed(h)}×` : "?") },
+      {
+        label: "Rounds",
+        value: (h) => {
+          const rounds = all[h]?.rounds || [];
+          if (readOnly) return rounds.map(roundText).join(" · ") || "–";
+          return roundsEditor(h, rounds);
+        },
+      },
+      { label: "Auctions", num: true, value: (h) => fmt(counts.get(h) || 0) },
+    ],
+    hosts,
+  );
 }
 
 function renderLotSizes(auctions) {
@@ -462,6 +713,8 @@ function render() {
   renderCards(auctions);
   renderChart(auctions);
   renderItems(auctions);
+  renderAgeChart(auctions);
+  renderServerTable();
   renderLotSizes(auctions);
   renderBuyers(auctions);
   renderAuctions(auctions);
@@ -510,7 +763,11 @@ function download(name, content, type) {
 const stamp = () => new Date().toISOString().slice(0, 10);
 
 function toCsv(auctions) {
-  const cols = ["server", "itemTypeId", "itemName", "quantity", "price", "unitPrice", "bidder", "alliance", "bids", "firstSeenAt"];
+  const cols = ["server", "speed", "round", "serverDay", "itemTypeId", "itemName", "quantity", "price", "unitPrice", "bidder", "alliance", "bids", "firstSeenAt"];
+  auctions = auctions.map((a) => {
+    const age = serverAge(state.db.serverRounds, a.server, a.firstSeenAt);
+    return { ...a, speed: serverSpeed(a.server), round: age?.round, serverDay: age?.day };
+  });
   const esc = (v) => {
     const s = v === null || v === undefined ? "" : String(v);
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;

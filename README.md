@@ -38,6 +38,26 @@ Only *finished* auctions are tracked. Running auctions are dropped while the pag
 read and never stored, not even in the raw captures. The parser looks at them only to
 see which way the list is sorted.
 
+## Server age
+
+Every auction records its game server (the page address, e.g.
+`ts1.x1.europe.travian.com`) and that server's speed (`x1` = 1×). To compare price
+trends by how old a server is, enter each server's rounds under
+**Price by server age → Servers**: a start date (day 1) and the last day of the round.
+Leave the end empty while a round is running. When a new server starts on the same
+address, end the old round and add a new one.
+
+Auctions that fall outside every round you've entered get no server day. That's
+safer than counting them towards an old round. A round without an end that is
+followed by another round ends where the next one starts.
+
+The chart shows the median price per unit per server day, one line per round. Tick
+"Scale days by server speed" to line up servers of different speeds. The CSV export
+includes `speed`, `round` and `serverDay`.
+
+The game page doesn't show a server's dates, so they have to be entered by hand. They
+sync between PCs and show on the web version.
+
 ## How duplicates are detected
 
 The game shows no auction id. An auction is identified by server + item + quantity +

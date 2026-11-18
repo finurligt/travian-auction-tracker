@@ -55,6 +55,23 @@
     </section>
 
     <section>
+      <h2>Price by server age <span class="muted">(median per unit, by day of the server round)</span></h2>
+      <div class="toolbar">
+        <label>Item <select id="ageItem"></select></label>
+        <label><input id="ageScale" type="checkbox"> Scale days by server speed</label>
+        <span class="legend" id="ageLegend"></span>
+      </div>
+      <div class="chart" id="ageChart">
+        <svg id="ageSvg" role="img" aria-label="Price per unit by server day"></svg>
+        <div class="tooltip" id="ageTooltip" hidden></div>
+      </div>
+      <p class="muted note" id="ageNote"></p>
+      <h3>Servers</h3>
+      <div class="scroll"><table id="servers"></table></div>
+      <p class="muted note edit-only">Add a round per server start: the start date (day 1) and the last day. Leave the end empty while the round is running. A new round on the same address is a new row. Auctions outside every round get no server day. Rounds sync to your other PCs and the web version.</p>
+    </section>
+
+    <section>
       <h2>Lot sizes <span class="muted">(which amount sells for the most per unit)</span></h2>
       <div class="scroll"><table id="lotSizes"></table></div>
       <p class="muted note">Only items sold in more than one amount. "vs best" compares each amount's median price per unit with the best amount of the same item. Sizes with fewer than 5 sales are marked as uncertain.</p>
