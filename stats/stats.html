@@ -18,9 +18,20 @@
       <option value="7">Last 7 days</option>
       <option value="30">Last 30 days</option>
     </select></label>
+    <button id="logout" class="web-only" type="button">Log out</button>
   </header>
 
   <main>
+    <section id="login" class="login">
+      <h2>Log in</h2>
+      <p class="muted">Enter the token from your sync server (VIEW_TOKEN or SYNC_TOKEN). It's remembered in this browser.</p>
+      <form id="loginForm">
+        <input id="loginToken" type="password" autocomplete="current-password" aria-label="Token" placeholder="Token">
+        <button type="submit" class="primary">Show statistics</button>
+      </form>
+      <p id="loginStatus" class="warn"></p>
+    </section>
+
     <section class="cards" id="cards"></section>
 
     <section>
@@ -63,7 +74,7 @@
       <div class="scroll"><table id="auctions"></table></div>
     </section>
 
-    <section>
+    <section class="edit-only">
       <h2>Data</h2>
       <div class="toolbar">
         <button id="exportJson">Export JSON</button>
@@ -73,6 +84,14 @@
         <button id="clear" class="danger">Delete all data</button>
       </div>
       <p id="dataStatus" class="muted"></p>
+      <h3>Sync between PCs</h3>
+      <form id="syncForm" class="sync-form">
+        <label>Server address <input id="syncUrl" type="url" placeholder="https://your-app.vercel.app" autocomplete="off"></label>
+        <label>Token <input id="syncToken" type="password" autocomplete="off"></label>
+        <button type="submit">Save</button>
+        <button type="button" id="syncNow">Sync now</button>
+      </form>
+      <p id="syncStatus" class="muted"></p>
       <h3>Captures</h3>
       <div class="scroll"><table id="captures"></table></div>
     </section>

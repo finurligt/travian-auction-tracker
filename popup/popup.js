@@ -1,9 +1,10 @@
 import { applyCapture } from "../src/dedup.js";
-import { loadDb, saveDb } from "../src/storage.js";
+import { loadDb, requestSync, saveDb } from "../src/storage.js";
 
 const statusEl = document.getElementById("status");
 const totalsEl = document.getElementById("totals");
 const captureBtn = document.getElementById("capture");
+const syncEl = document.getElementById("sync");
 
 function showStatus(html, kind = "") {
   statusEl.hidden = false;
@@ -46,12 +47,30 @@ captureBtn.addEventListener("click", async () => {
     }
     showStatus(html, "ok");
     await showTotals();
+    await sync();
   } catch (e) {
-    showStatus(`Capture failed: ${e.message}`, "error");
+    showStatus("", "error");
+    statusEl.textContent = `Capture failed: ${e.message}`;
   } finally {
     captureBtn.disabled = false;
   }
 });
+
+async function sync() {
+  syncEl.hidden = false;
+  syncEl.className = "muted";
+  syncEl.textContent = "Syncing…";
+  const result = await requestSync();
+  if (result.skipped) {
+    syncEl.hidden = true;
+  } else if (result.ok) {
+    syncEl.textContent = result.downloaded ? `Synced – ${result.downloaded} captures from other PCs.` : "Synced.";
+    await showTotals();
+  } else {
+    syncEl.className = "warn";
+    syncEl.textContent = `Not synced (${result.error}). Saved here; it will retry next time.`;
+  }
+}
 
 document.getElementById("stats").addEventListener("click", () => {
   browser.tabs.create({ url: browser.runtime.getURL("stats/stats.html") });

@@ -267,3 +267,63 @@ tr.group-start td {
   padding: 14px;
   color: var(--muted);
 }
+
+.sync-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: end;
+}
+
+.sync-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.sync-form input {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  min-width: 240px;
+}
+
+/* Web (read-only) version: no editing, log in first. */
+.login,
+.web-only {
+  display: none;
+}
+
+.read-only .web-only {
+  display: inline-block;
+}
+
+.read-only .edit-only,
+.logged-out main > section:not(.login),
+.logged-out header label,
+.logged-out #logout {
+  display: none;
+}
+
+.logged-out .login {
+  display: block;
+  max-width: 420px;
+  margin: 40px auto;
+}
+
+.login form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.login input {
+  flex: 1 1 200px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+}

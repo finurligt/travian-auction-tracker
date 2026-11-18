@@ -1,3 +1,7 @@
 node_modules/
 *.zip
 *.xpi
+.vercel/
+.env*
+!.env.example
+dist-web/

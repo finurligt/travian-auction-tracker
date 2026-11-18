@@ -62,11 +62,59 @@ That happens on its own as page breaks shift, and the counts then correct themse
 Every raw capture is kept, so **Rebuild from captures** can recompute everything,
 for example after deleting a bad capture or importing data from another browser.
 
+## Sync between PCs and the web version (optional)
+
+A small server (`api/` + `server/`, deployed on Vercel with a Neon Postgres database)
+does two things:
+
+- **Sync:** each PC with the extension uploads its new captures and downloads the ones
+  made elsewhere, after every capture and whenever the statistics page opens. Captures
+  never change, so they merge without conflicts. Deleting a capture while sync is on
+  deletes it on all PCs.
+- **Web version:** the same statistics page, read-only, at the server's address. Use it
+  from your phone or any browser without the extension. It asks for a token once and
+  remembers it.
+
+The extension only ever talks to your own server, never to Travian.
+
+### Deploy (Vercel + Neon)
+
+1. Vercel → **Add New → Project** → import this repository. Keep the Root Directory at
+   the repository root; `vercel.json` sets up the build. Deploy.
+2. In the new project: **Storage → Create/Connect → Neon**, region **Frankfurt
+   (eu-central-1)**, to match the function region in `vercel.json`. This adds
+   `DATABASE_URL`. The table is created automatically on the first request.
+3. **Settings → Environment Variables**, then redeploy:
+   - `SYNC_TOKEN`: long random value (`openssl rand -base64 32`). Used by the extension;
+     can read, add and delete.
+   - `VIEW_TOKEN` (optional): another random value that can only *view* the statistics.
+     Use this one on your phone so the write token stays on your PCs.
+4. Check it: `curl -H "Authorization: Bearer <SYNC_TOKEN>" https://<project>.vercel.app/api/captures`
+   should answer `{"captures":[],"next":0,"more":false}`.
+
+### Connect each PC
+
+On the statistics page, under **Data → Sync between PCs**, enter
+`https://<project>.vercel.app` and the `SYNC_TOKEN`, then click **Save**. That PC's
+existing captures are uploaded, and the other PCs' captures are downloaded.
+
+The token is stored in the extension's local storage on each PC. It's never included in
+JSON exports. To change it, set a new `SYNC_TOKEN` in Vercel, redeploy, and enter it on
+each PC.
+
+### Phone / any browser
+
+Open `https://<project>.vercel.app` and enter the `VIEW_TOKEN` (or the `SYNC_TOKEN`).
+On a phone, "Add to Home Screen" gives it an app-like icon. It shows whatever has been
+synced; capture with the extension on a PC as usual.
+
 ## Develop
 
 ```sh
 npm install
-npm test
+npm test            # extension, web page and server; server tests use an in-memory Postgres (PGlite)
+npm run build:web   # web version into dist-web/ (Vercel runs this)
+npm run package     # extension zip for addons.mozilla.org
 ```
 
 `test/fixtures/your-bids.html` is a trimmed copy of a real "Your bids" page.

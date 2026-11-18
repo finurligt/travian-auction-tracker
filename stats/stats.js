@@ -1,5 +1,17 @@
 import { emptyDb, rebuild } from "../src/dedup.js";
-import { loadDb, saveDb } from "../src/storage.js";
+import {
+  isConfigured,
+  loadDb,
+  loadSync,
+  LoginRequired,
+  logout,
+  onDbChanged,
+  readOnly,
+  requestSync,
+  saveDb,
+  saveSync,
+  setToken,
+} from "../src/platform.js";
 
 const $ = (id) => document.getElementById(id);
 const state = { db: emptyDb(), server: "", sinceDays: 0, item: null, search: "" };
@@ -73,7 +85,7 @@ function renderCards(auctions) {
     ["Auctions", fmt(auctions.length)],
     ["Silver spent", fmt(total)],
     ["Buyers", fmt(new Set(auctions.map((a) => a.bidderRaw)).size)],
-    ["Captures", fmt(state.db.captures.length)],
+    ["Captures", fmt(state.db.captureCount ?? state.db.captures.length)],
   ];
   $("cards").replaceChildren(
     ...cards.map(([label, value]) => {
@@ -463,10 +475,27 @@ async function commit(db, message) {
   render();
 }
 
+// With sync on, deletions are queued for the server so other PCs drop
+// the captures too.
+async function queueRemoteDelete(ids) {
+  const sync = await loadSync();
+  if (!isConfigured(sync)) return false;
+  const gone = new Set(ids);
+  await saveSync({
+    ...sync,
+    pendingDeletes: [...new Set([...(sync.pendingDeletes || []), ...ids])],
+    synced: (sync.synced || []).filter((id) => !gone.has(id)),
+  });
+  return true;
+}
+
 async function deleteCapture(id) {
-  if (!confirm("Delete this capture and recompute auctions without it?")) return;
+  const everywhere = isConfigured(await loadSync());
+  if (!confirm(`Delete this capture${everywhere ? " on all your PCs" : ""} and recompute auctions without it?`)) return;
+  await queueRemoteDelete([id]);
   const db = { ...state.db, captures: state.db.captures.filter((c) => c.id !== id) };
   await commit(rebuild(db), "Capture deleted.");
+  if (everywhere) await runSync();
 }
 
 function download(name, content, type) {
@@ -520,6 +549,7 @@ $("import").addEventListener("change", async (e) => {
     const added = incoming.captures.filter((c) => !known.has(c.id));
     const db = rebuild({ ...state.db, captures: [...state.db.captures, ...added] });
     await commit(db, `Imported ${added.length} new captures.`);
+    if (added.length) await runSync();
   } catch (err) {
     $("dataStatus").textContent = `Import failed: ${err.message}`;
   }
@@ -530,17 +560,103 @@ $("rebuild").addEventListener("click", async () => {
 });
 
 $("clear").addEventListener("click", async () => {
-  if (!confirm("Delete ALL stored auctions and captures? Export first if you want a backup.")) return;
+  const everywhere = isConfigured(await loadSync());
+  const where = everywhere ? " on ALL your PCs and the sync server" : "";
+  if (!confirm(`Delete ALL stored auctions and captures${where}? Export first if you want a backup.`)) return;
+  await queueRemoteDelete(state.db.captures.map((c) => c.id));
   await commit(emptyDb(), "All data deleted.");
+  if (everywhere) await runSync();
 });
+
+function renderSyncStatus(sync, message) {
+  const el = $("syncStatus");
+  el.className = sync.lastError && !message ? "warn" : "muted";
+  if (message) el.textContent = message;
+  else if (!isConfigured(sync)) el.textContent = "Not set up – data is only stored in this browser.";
+  else if (sync.lastError) el.textContent = `Last sync failed: ${sync.lastError}`;
+  else if (sync.lastSyncAt) el.textContent = `Last synced ${fmtDate(sync.lastSyncAt)}.`;
+  else el.textContent = "Not synced yet.";
+}
+
+async function runSync() {
+  const sync = await loadSync();
+  if (!isConfigured(sync)) return renderSyncStatus(sync);
+  renderSyncStatus(sync, "Syncing…");
+  const result = await requestSync();
+  const after = await loadSync();
+  if (!result.ok) return renderSyncStatus(after);
+  const parts = [`uploaded ${result.uploaded}`, `downloaded ${result.downloaded}`];
+  if (result.removedLocally) parts.push(`removed ${result.removedLocally} deleted on another PC`);
+  renderSyncStatus(after, `Synced ${fmtDate(after.lastSyncAt)}: ${parts.join(", ")}.`);
+}
+
+$("syncForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const sync = await loadSync();
+  const url = $("syncUrl").value.trim();
+  const token = $("syncToken").value.trim();
+  if (url && !/^https:\/\//.test(url) && !/^http:\/\/localhost(:|\/|$)/.test(url)) {
+    return renderSyncStatus(sync, "The address must start with https://");
+  }
+  // A different server knows nothing about what we uploaded before.
+  const sameServer = url === sync.url;
+  await saveSync({
+    ...sync,
+    url,
+    token,
+    lastSeq: sameServer ? sync.lastSeq : 0,
+    synced: sameServer ? sync.synced : [],
+    pendingDeletes: sameServer ? sync.pendingDeletes : [],
+    lastError: null,
+  });
+  await runSync();
+});
+$("syncNow").addEventListener("click", runSync);
 
 // Keep the page live if a capture is made while it is open.
-browser.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes.db) {
-    state.db = changes.db.newValue || emptyDb();
-    render();
-  }
+onDbChanged((db) => {
+  state.db = db || emptyDb();
+  render();
 });
 
-state.db = await loadDb();
-render();
+// Web version only: asks for the token, or shows why loading failed.
+function showLogin(message) {
+  document.body.classList.add("logged-out");
+  $("loginStatus").textContent = message || "";
+  $("loginToken").focus();
+}
+
+$("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const token = $("loginToken").value.trim();
+  if (token) setToken(token);
+  $("loginStatus").textContent = "Loading…";
+  await start();
+});
+
+$("logout").addEventListener("click", () => {
+  logout();
+  state.db = emptyDb();
+  render();
+  showLogin("");
+});
+
+async function start() {
+  try {
+    state.db = await loadDb();
+  } catch (e) {
+    if (e instanceof LoginRequired) return showLogin(e.message);
+    if (readOnly) return showLogin(`Couldn't load the statistics: ${e.message}`);
+    throw e;
+  }
+  document.body.classList.remove("logged-out");
+  render();
+  if (readOnly) return;
+  const savedSync = await loadSync();
+  $("syncUrl").value = savedSync.url || "";
+  $("syncToken").value = savedSync.token || "";
+  runSync();
+}
+
+if (readOnly) document.body.classList.add("read-only");
+await start();
