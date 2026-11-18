@@ -5,7 +5,7 @@
   "scripts": {
     "test": "node --test test/*.test.js server/test/*.test.js",
     "build:web": "node scripts/build-web.js",
-    "package": "rm -f travian-auction-tracker.zip && python3 -m zipfile -c travian-auction-tracker.zip manifest.json background icons popup src stats"
+    "package": "node scripts/package.js"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.16",
